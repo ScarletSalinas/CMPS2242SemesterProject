@@ -38,78 +38,89 @@ func broadcast(sender *Client, msg string) {
 }
 
 func handleConnection(conn net.Conn) {
-	// Prompt for username
-	conn.Write([]byte("Enter your username: "))
-	username, err := bufio.NewReader(conn).ReadString('\n')
-	if err != nil {
-		conn.Close()
-		return
-	}
-
-	username = strings.TrimSpace(username)
-
 	// Create and register new client
-	client := &Client{Conn: conn, Username: username}
-	clientsMu.Lock()
-	clients[client] = true
-	clientsMu.Unlock()
+    client := &Client{Conn: conn}
+
+	// Cleanup on exit
+    defer func() {
+        clientsMu.Lock()
+        delete(clients, client)
+        clientsMu.Unlock()
+        broadcast(nil, fmt.Sprintf("[%s %s] has left the chat", time.Now().Format("15:04"), client.Username))
+        conn.Close()
+        log.Printf("Connection closed (%d remaining)", len(clients))
+    }()
+
+	// Thread-safe writer
+    type syncWriter struct {
+        sync.Mutex
+        conn net.Conn
+    }
+
+    write := func(w *syncWriter, text string) {
+        w.Lock()
+        defer w.Unlock()
+        w.conn.Write([]byte(text))
+    }
+    
+    w := &syncWriter{conn: conn}
+
+	// Prompt for username
+	write(w, "Enter your username: ")  
+	username, err := bufio.NewReader(conn).ReadString('\n')
+    if err != nil {
+        return
+    }
+    client.Username = strings.TrimRight(username, "\r\n") // Strict trim
+
+    clientsMu.Lock()
+    clients[client] = true
+    clientsMu.Unlock()
+
 
 	log.Printf("New connection (%d active)", len(clients))
-	broadcast(nil, username + " has joined the chat")  // Notify all
-	conn.Write([]byte("Welcome, " + username + "! Type /help for commands\n"))
-
-	defer func() {
-		// Cleanup on exit
-		clientsMu.Lock()
-		delete(clients, client)
-		clientsMu.Unlock()
-		broadcast(nil, username + " has left the chat")
-		conn.Close()
-		log.Printf("Connection closed (%d remaining)", len(clients))
-	}()
-
-	// Initialize chat
-    conn.Write([]byte("\n=== Chat Started ===\n"))
-	prompt := func() { conn.Write([]byte("> ")) }  // Helper function
-
-	prompt()
-    
-    // Create a channel for user input
+	// Send join notification (with consistent formatting)
+	joinMsg := fmt.Sprintf("[%s %s] has joined", time.Now().Format("15:04"), client.Username)
+	broadcast(nil, joinMsg)
+	write(w, fmt.Sprintf("Welcome, %s! Type /help for commands\n\n=== Chat Started ===\n", client.Username))
+	
+	// Channels
     inputChan := make(chan string)
-    
-    // Goroutine to show prompts and read input
+    promptChan := make(chan bool)
+    defer close(inputChan)
+    defer close(promptChan)
+
     go func() {
         reader := bufio.NewReader(conn)
         for {
+            write(w, "> ") // Only prompt here
             msg, err := reader.ReadString('\n')
             if err != nil {
                 close(inputChan)
                 return
             }
-            inputChan <- strings.TrimSpace(msg)
+            inputChan <- strings.TrimRight(msg, "\r\n")
         }
     }()
 
+	// Message handling
 	for msg := range inputChan {
         if len(msg) == 0 {
-			prompt()
             continue
         }
 
-		switch {
+        switch {
 		case msg == "/quit":
-			conn.Write([]byte("Goodbye!\n"))
+			write(w, "Goodbye!\n")
 			return
 		
 		case msg == "/help":
-			helpMsg := `
-		Available commands:
-		/help    - Show this help message
-		/who     - List online users
-		/quit    - Disconnect from chat
-		`
-			conn.Write([]byte(helpMsg))
-			conn.Write([]byte("> ")) // Restore prompt
+			helpMsg := `Available commands:
+/help    - Show this help message
+/who     - List online users
+/quit    - Disconnect from chat
+`
+		write(w, helpMsg)
 
 		case msg == "/who":
 			clientsMu.Lock()
@@ -118,18 +129,17 @@ func handleConnection(conn net.Conn) {
 				users = append(users, c.Username)
 			}
 			clientsMu.Unlock()
-			conn.Write([]byte("Online users: " + strings.Join(users, ", ") + "\n"))
-			prompt()
+			write(w, "Online: "+strings.Join(users, ", ")+"\n")
 
 		case strings.HasPrefix(msg, "/"):
-			conn.Write([]byte("Unknown command. Try /who or /quit\n"))
-			prompt()
+			write(w, "Unknown command. Try /help for options\n")
 
 		default:
-			broadcast(client, fmt.Sprintf("[%s] %s: %s", time.Now().Format("15:04"), username, msg))
-			prompt()
+			broadcast(client, fmt.Sprintf("[%s %s]: %s", time.Now().Format("15:04"), client.Username, msg))
 		}
 	}
+
+
 }
 
 func main() {
