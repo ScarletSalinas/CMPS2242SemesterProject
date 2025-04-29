@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"log"
 	"net"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Client struct {
@@ -47,7 +49,7 @@ func handleConnection(conn net.Conn) {
 	username = strings.TrimSpace(username)
 
 	// Create and register new client
-	client := &Client{Conn: conn}
+	client := &Client{Conn: conn, Username: username}
 	clientsMu.Lock()
 	clients[client] = true
 	clientsMu.Unlock()
@@ -68,6 +70,9 @@ func handleConnection(conn net.Conn) {
 
 	// Initialize chat
     conn.Write([]byte("\n=== Chat Started ===\n"))
+	prompt := func() { conn.Write([]byte("> ")) }  // Helper function
+
+	prompt()
     
     // Create a channel for user input
     inputChan := make(chan string)
@@ -76,7 +81,6 @@ func handleConnection(conn net.Conn) {
     go func() {
         reader := bufio.NewReader(conn)
         for {
-            conn.Write([]byte("> "))  // Show prompt first
             msg, err := reader.ReadString('\n')
             if err != nil {
                 close(inputChan)
@@ -88,6 +92,7 @@ func handleConnection(conn net.Conn) {
 
 	for msg := range inputChan {
         if len(msg) == 0 {
+			prompt()
             continue
         }
 
@@ -95,6 +100,16 @@ func handleConnection(conn net.Conn) {
 		case msg == "/quit":
 			conn.Write([]byte("Goodbye!\n"))
 			return
+		
+		case msg == "/help":
+			helpMsg := `
+		Available commands:
+		/help    - Show this help message
+		/who     - List online users
+		/quit    - Disconnect from chat
+		`
+			conn.Write([]byte(helpMsg))
+			conn.Write([]byte("> ")) // Restore prompt
 
 		case msg == "/who":
 			clientsMu.Lock()
@@ -104,12 +119,15 @@ func handleConnection(conn net.Conn) {
 			}
 			clientsMu.Unlock()
 			conn.Write([]byte("Online users: " + strings.Join(users, ", ") + "\n"))
+			prompt()
 
 		case strings.HasPrefix(msg, "/"):
 			conn.Write([]byte("Unknown command. Try /who or /quit\n"))
+			prompt()
 
 		default:
-			broadcast(client, "["+username+"] "+msg)
+			broadcast(client, fmt.Sprintf("[%s] %s: %s", time.Now().Format("15:04"), username, msg))
+			prompt()
 		}
 	}
 }
