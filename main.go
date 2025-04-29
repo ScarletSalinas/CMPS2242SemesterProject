@@ -66,18 +66,30 @@ func handleConnection(conn net.Conn) {
 		log.Printf("Connection closed (%d remaining)", len(clients))
 	}()
 
-	// Message handling loop
-	scanner := bufio.NewScanner(conn)
+	// Initialize chat
+    conn.Write([]byte("\n=== Chat Started ===\n"))
+    
+    // Create a channel for user input
+    inputChan := make(chan string)
+    
+    // Goroutine to show prompts and read input
+    go func() {
+        reader := bufio.NewReader(conn)
+        for {
+            conn.Write([]byte("> "))  // Show prompt first
+            msg, err := reader.ReadString('\n')
+            if err != nil {
+                close(inputChan)
+                return
+            }
+            inputChan <- strings.TrimSpace(msg)
+        }
+    }()
 
-	for scanner.Scan() {
-		// Show input prompt
-		conn.Write([]byte("> "))
-		
-		msg := strings.TrimSpace(scanner.Text())
-
-		if len(msg) == 0 {
-			continue
-		}
+	for msg := range inputChan {
+        if len(msg) == 0 {
+            continue
+        }
 
 		switch {
 		case msg == "/quit":
