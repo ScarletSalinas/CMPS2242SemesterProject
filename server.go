@@ -180,3 +180,15 @@ func (s *Server) broadcast(sender *Client, msg string) {
 		}
 	}
 }
+
+// cleanupClient removes a disconnected client
+func (s *Server) cleanupClient(client *Client) {
+	s.clientsMu.Lock()
+	delete(s.clients, client)
+	s.clientsMu.Unlock()
+
+	leaveMsg := fmt.Sprintf("[%s %s] has left", time.Now().Format("15:04"), client.Username)
+	s.broadcast(nil, leaveMsg)
+	client.Conn.Close()
+	log.Printf("%s disconnected (%d remaining)", client.Username, len(s.clients))
+}
