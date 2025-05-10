@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"net"
+	"strings"
 	"sync"
 )
 
@@ -47,4 +49,24 @@ func newClient(conn net.Conn) *Client {
 		Conn:   conn,
 		writer: newSyncWriter(conn),
 	}
+}
+
+// sendMessage safely writes a message to the client's connection
+func (c *Client) sendMessage(msg string) error {
+	return c.writer.write(msg)
+}
+
+// prompt sends a prompt to the client (e.g., for username)
+func (c *Client) prompt(text string) error {
+	return c.sendMessage(text)
+}
+
+// readInput reads a line of input from the client
+func (c *Client) readInput() (string, error) {
+	reader := bufio.NewReader(c.Conn)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(input), nil
 }
