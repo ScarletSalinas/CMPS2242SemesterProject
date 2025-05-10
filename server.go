@@ -53,17 +53,17 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}
 
 	// Start chat session
-	s.broadcastJoin(client)
+	s.broadcastSystemMessage(fmt.Sprintf("\033[1;33m%s has joined the chat\033[0m", client.Username))
+	client.sendMessage(fmt.Sprintf("\033[1;32mWelcome, %s!\033[0m Type /help for commands\n", client.Username))
+	
 	s.startChatLoop(client)
 }
 
 // registerClient gets and sets the client's username
 func (s *Server) registerClient(client *Client) error {
-	if err := client.prompt("Enter your username: "); err != nil {
-		return err
-	}
-
+	client.prompt("\033[1;36mEnter your username: \033[0m")
 	username, err := client.readInput()
+
 	if err != nil {
 		return err
 	}
@@ -74,14 +74,6 @@ func (s *Server) registerClient(client *Client) error {
 	s.clientsMu.Unlock()
 
 	return nil
-}
-
-// broadcastJoin announces a new user to all clients
-func (s *Server) broadcastJoin(client *Client) {
-	joinMsg := fmt.Sprintf("[%s %s] has joined", time.Now().Format("15:04"), client.Username)
-	s.broadcast(nil, joinMsg)
-	client.sendMessage(fmt.Sprintf("Welcome, %s! Type /help for commands\n", client.Username))
-	log.Printf("New connection: %s (%d active)", client.Username, len(s.clients))
 }
 
 // startChatLoop handles the main chat session for a client
@@ -115,26 +107,20 @@ func (s *Server) startChatLoop(client *Client) {
 func (s *Server) handleMessage(client *Client, msg string) {
 	switch {
 	case msg == "/quit":
-		client.sendMessage("Goodbye!")
+		client.sendMessage("\033[1;31mYou left the chat\033[0m")
 		client.Conn.Close()
 
 	case msg == "/help":
-		client.sendMessage(`Available commands:
-/help    - Show help 
-/who     - List online users
-/quit    - Disconnect from chat`)
+		client.sendMessage("\033[1;35mAvailable commands:\n/help    - Show help\n/who     - List online users\n/quit    - Disconnect from chat\033[0m")
 
 	case msg == "/who":
 		s.listUsers(client)
 
 	case strings.HasPrefix(msg, "/"):
-		client.sendMessage("Unknown command. Try /help")
+		client.sendMessage("\033[1;31mUnknown command. Try /help\033[0m")
 
 	default:
-		chatMsg := fmt.Sprintf("[%s %s]: %s", 
-			time.Now().Format("15:04"), 
-			client.Username, 
-			msg)
+		chatMsg := fmt.Sprintf("\033[1;34m[%s]\033[0m \033[1;36m%s\033[0m: %s", time.Now().Format("15:04"), client.Username, msg)
 		s.broadcast(client, chatMsg)
 	}
 }
@@ -148,7 +134,7 @@ func (s *Server) listUsers(client *Client) {
 	for c := range s.clients {
 		users = append(users, c.Username)
 	}
-	client.sendMessage("Online: " + strings.Join(users, ", "))
+	client.sendMessage(fmt.Sprintf("\033[1;35mOnline users: \033[1;33m%s\033[0m", strings.Join(users, ", ")))
 }
 
 // broadcast sends a message to all clients
@@ -157,12 +143,18 @@ func (s *Server) broadcast(sender *Client, msg string) {
 	defer s.clientsMu.Unlock()
 
 	for client := range s.clients {
-		if client == sender {
-			continue
+		if client != sender {
+			client.sendMessage(msg)
 		}
-		if err := client.sendMessage(msg); err != nil {
-			log.Printf("Error sending to %s: %v", client.Username, err)
-		}
+	}
+}
+
+func (s *Server) broadcastSystemMessage(msg string) {
+	s.clientsMu.Lock()
+	defer s.clientsMu.Unlock()
+
+	for client := range s.clients {
+		client.sendMessage(msg)
 	}
 }
 
@@ -172,8 +164,7 @@ func (s *Server) cleanupClient(client *Client) {
 	delete(s.clients, client)
 	s.clientsMu.Unlock()
 
-	leaveMsg := fmt.Sprintf("[%s %s] has left", time.Now().Format("15:04"), client.Username)
-	s.broadcast(nil, leaveMsg)
+	s.broadcastSystemMessage(fmt.Sprintf("\033[1;31m%s has left the chat\033[0m", client.Username))
 	client.Conn.Close()
 	log.Printf("%s disconnected (%d remaining)", client.Username, len(s.clients))
 }
