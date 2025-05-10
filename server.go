@@ -91,3 +91,70 @@ func (s *Server) broadcastJoin(client *Client) {
 	client.sendMessage(fmt.Sprintf("Welcome, %s! Type /help for commands\n", client.Username))
 	log.Printf("New connection: %s (%d active)", client.Username, len(s.clients))
 }
+
+// startChatLoop handles the main chat session for a client
+func (s *Server) startChatLoop(client *Client) {
+	inputChan := make(chan string)
+	defer close(inputChan)
+
+	// Input reader goroutine
+	go func() {
+		for {
+			msg, err := client.readInput()
+			if err != nil {
+				log.Printf("Read error from %s: %v", client.Username, err)
+				close(inputChan)
+				return
+			}
+			inputChan <- msg
+		}
+	}()
+
+	// Message processor
+	for msg := range inputChan {
+		if len(msg) == 0 {
+			continue
+		}
+		s.handleMessage(client, msg)
+	}
+}
+
+// handleMessage processes a single message/command
+func (s *Server) handleMessage(client *Client, msg string) {
+	switch {
+	case msg == "/quit":
+		client.sendMessage("Goodbye!")
+		client.Conn.Close()
+
+	case msg == "/help":
+		client.sendMessage(`Available commands:
+/help    - Show help 
+/who     - List online users
+/quit    - Disconnect from chat`)
+
+	case msg == "/who":
+		s.listUsers(client)
+
+	case strings.HasPrefix(msg, "/"):
+		client.sendMessage("Unknown command. Try /help")
+
+	default:
+		chatMsg := fmt.Sprintf("[%s %s]: %s", 
+			time.Now().Format("15:04"), 
+			client.Username, 
+			msg)
+		s.broadcast(client, chatMsg)
+	}
+}
+
+// listUsers sends the online user list to a client
+func (s *Server) listUsers(client *Client) {
+	s.clientsMu.Lock()
+	defer s.clientsMu.Unlock()
+
+	var users []string
+	for c := range s.clients {
+		users = append(users, c.Username)
+	}
+	client.sendMessage("Online: " + strings.Join(users, ", "))
+}

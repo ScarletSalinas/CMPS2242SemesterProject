@@ -2,11 +2,11 @@ package main
 
 import (
 	"log"
-	"net"
 )
 
 func main() {
-	server := NewServer(":4000")
-	log.Println("Chat server running on :4000")
-	server.Start()
+	server := NewServer()
+	if err := server.Start(":4000"); err != nil {
+		log.Fatal(err)
+	}
 }
