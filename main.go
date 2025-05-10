@@ -10,10 +10,6 @@ import (
 	"time"
 )
 
-type Client struct {
-	Conn net.Conn
-	Username string
-}
 
 var (
 	clients = make(map[*Client]bool)   // Tracks all connected clients
@@ -51,11 +47,6 @@ func handleConnection(conn net.Conn) {
         log.Printf("Connection closed (%d remaining)", len(clients))
     }()
 
-	// Thread-safe writer
-    type syncWriter struct {
-        sync.Mutex
-        conn net.Conn
-    }
 
     write := func(w *syncWriter, text string) {
         w.Lock()
@@ -70,7 +61,6 @@ func handleConnection(conn net.Conn) {
 
 }
     
-	w := &syncWriter{conn: conn}
 
 	// Prompt for username
 	write(w, "Enter your username: ")  
