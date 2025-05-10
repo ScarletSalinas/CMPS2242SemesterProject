@@ -25,7 +25,7 @@ func newSyncWriter(conn net.Conn) *syncWriter {
 	return &syncWriter{conn: conn}
 }
 
-// write clears the line and writes text (thread-safe)
+// Method for prompts-no newline
 func (w *syncWriter) write(text string) error {
 	w.Lock()
 	defer w.Unlock()
@@ -35,12 +35,26 @@ func (w *syncWriter) write(text string) error {
 		return err
 	}
 	
-	// Write the actual text
 	if _, err := w.conn.Write([]byte(text)); err != nil {
 		return err
 	}
 	
 	return nil
+}
+
+// Method for chat messages-adds newline
+func (w *syncWriter) writeMessage(msg string) error {
+	w.Lock()
+	defer w.Unlock()
+	
+	// Clear line, write message, then newline
+	if _, err := w.conn.Write([]byte("\033[2K\r" + msg + "\n")); err != nil {
+		return err
+	}
+	
+	// Re-draw prompt if needed
+	_, err := w.conn.Write([]byte("> "))
+	return err
 }
 
 // newClient creates and initializes a new Client
@@ -51,14 +65,14 @@ func newClient(conn net.Conn) *Client {
 	}
 }
 
-// sendMessage safely writes a message to the client's connection
-func (c *Client) sendMessage(msg string) error {
-	return c.writer.write(msg)
+// prompt sends a prompt to the client 
+func (c *Client) prompt(text string) error {
+	return c.writer.write(text)
 }
 
-// prompt sends a prompt to the client (e.g., for username)
-func (c *Client) prompt(text string) error {
-	return c.sendMessage(text)
+// sendMessage safely writes a message to the client's connection
+func (c *Client) sendMessage(msg string) error {
+	return c.writer.writeMessage(msg)
 }
 
 // readInput reads a line of input from the client
