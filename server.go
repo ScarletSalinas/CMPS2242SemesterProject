@@ -1,6 +1,7 @@
 package main
 
 import(
+		"fmt"
 		"log"
 		"net"
 		"strings"
@@ -81,4 +82,12 @@ func (s *Server) registerClient(client *Client) error {
 	s.clientsMu.Unlock()
 
 	return nil
+}
+
+// broadcastJoin announces a new user to all clients
+func (s *Server) broadcastJoin(client *Client) {
+	joinMsg := fmt.Sprintf("[%s %s] has joined", time.Now().Format("15:04"), client.Username)
+	s.broadcast(nil, joinMsg)
+	client.sendMessage(fmt.Sprintf("Welcome, %s! Type /help for commands\n", client.Username))
+	log.Printf("New connection: %s (%d active)", client.Username, len(s.clients))
 }
