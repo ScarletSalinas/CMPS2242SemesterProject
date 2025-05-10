@@ -57,21 +57,6 @@ func (s *Server) handleConnection(conn net.Conn) {
 	s.startChatLoop(client)
 }
 
-// handleConnection manages a new client connection
-func (s *Server) handleConnection(conn net.Conn) {
-	client := newClient(conn)
-	defer s.cleanupClient(client)
-
-	// Get username
-	if err := s.registerClient(client); err != nil {
-		return
-	}
-
-	// Start chat session
-	s.broadcastJoin(client)
-	s.startChatLoop(client)
-}
-
 // registerClient gets and sets the client's username
 func (s *Server) registerClient(client *Client) error {
 	if err := client.prompt("Enter your username: "); err != nil {
