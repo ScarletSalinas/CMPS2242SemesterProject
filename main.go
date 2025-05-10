@@ -60,10 +60,17 @@ func handleConnection(conn net.Conn) {
     write := func(w *syncWriter, text string) {
         w.Lock()
         defer w.Unlock()
+		
+    // Clear current line and write
+	_, err := w.conn.Write([]byte("\033[2K\r"))
+        if err != nil {
+            w.conn.Write([]byte("\n"))
+        }
         w.conn.Write([]byte(text))
-    }
+
+}
     
-    w := &syncWriter{conn: conn}
+	w := &syncWriter{conn: conn}
 
 	// Prompt for username
 	write(w, "Enter your username: ")  
@@ -73,30 +80,30 @@ func handleConnection(conn net.Conn) {
     }
     client.Username = strings.TrimRight(username, "\r\n") // Strict trim
 
+	// Register client
     clientsMu.Lock()
     clients[client] = true
     clientsMu.Unlock()
 
-
+	// Welcome client
 	log.Printf("New connection (%d active)", len(clients))
-	// Send join notification (with consistent formatting)
+	// Send join notification
 	joinMsg := fmt.Sprintf("[%s %s] has joined", time.Now().Format("15:04"), client.Username)
 	broadcast(nil, joinMsg)
 	write(w, fmt.Sprintf("Welcome, %s! Type /help for commands\n\n=== Chat Started ===\n", client.Username))
 	
-	// Channels
+	// Input handling
     inputChan := make(chan string)
-    promptChan := make(chan bool)
     defer close(inputChan)
-    defer close(promptChan)
 
+	// Input reader
     go func() {
         reader := bufio.NewReader(conn)
+
         for {
-            write(w, "> ") // Only prompt here
             msg, err := reader.ReadString('\n')
             if err != nil {
-                close(inputChan)
+				log.Printf("Read error: %v", err)
                 return
             }
             inputChan <- strings.TrimRight(msg, "\r\n")
@@ -111,18 +118,18 @@ func handleConnection(conn net.Conn) {
 
         switch {
 		case msg == "/quit":
-			write(w, "Goodbye!\n")
+			write(w, "You left.\n")
 			return
 		
-		case msg == "/help":
+		case msg == "/help":	// List available commands
 			helpMsg := `Available commands:
-/help    - Show this help message
+/help    - Show help 
 /who     - List online users
 /quit    - Disconnect from chat
 `
 		write(w, helpMsg)
 
-		case msg == "/who":
+		case msg == "/who":  // List clients in server
 			clientsMu.Lock()
 			var users []string
 			for c := range clients {
@@ -131,14 +138,13 @@ func handleConnection(conn net.Conn) {
 			clientsMu.Unlock()
 			write(w, "Online: "+strings.Join(users, ", ")+"\n")
 
-		case strings.HasPrefix(msg, "/"):
+		case strings.HasPrefix(msg, "/"): // Unknown command
 			write(w, "Unknown command. Try /help for options\n")
 
-		default:
-			broadcast(client, fmt.Sprintf("[%s %s]: %s", time.Now().Format("15:04"), client.Username, msg))
+		default:  // Broadcast msg
+			broadcast(client, fmt.Sprintf("[%s \033[1;36m%s\033[0m]: %s", time.Now().Format("15:04"), client.Username, msg))
 		}
 	}
-
 
 }
 
@@ -147,6 +153,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	defer listener.Close()
 	log.Println("Chat server running on :4000")
 
