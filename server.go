@@ -5,8 +5,15 @@ import(
 		"log"
 		"net"
 		"strings"
+		"sync"
 		"time"
 )
+
+
+type Server struct {
+	clients   map[*Client]bool
+	clientsMu sync.Mutex
+}
 
 // NewServer creates a new chat server instance
 func NewServer() *Server {
