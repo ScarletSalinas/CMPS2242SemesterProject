@@ -165,3 +165,18 @@ func (s *Server) listUsers(client *Client) {
 	}
 	client.sendMessage("Online: " + strings.Join(users, ", "))
 }
+
+// broadcast sends a message to all clients
+func (s *Server) broadcast(sender *Client, msg string) {
+	s.clientsMu.Lock()
+	defer s.clientsMu.Unlock()
+
+	for client := range s.clients {
+		if client == sender {
+			continue
+		}
+		if err := client.sendMessage(msg); err != nil {
+			log.Printf("Error sending to %s: %v", client.Username, err)
+		}
+	}
+}
