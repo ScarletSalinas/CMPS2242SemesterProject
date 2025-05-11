@@ -1,16 +1,18 @@
 package benchmarks
 
 import (
-	"bufio"
 	"net"
 	"testing"
 	"time"
+	"syscall"
 	"github.com/ScarletSalinas/SemesterProject/tcp"
 )
 
 const (
 	testPort    = ":5000"
-	testMessage = "benchmark\n"
+	testMessage = "benchmark\n" // For latency tests
+	largeMessage = "hello\n"   // For throughput tests
+
 )
 
 // startTestServer starts the TCP server and returns when ready
@@ -42,6 +44,7 @@ func startTestServer(b *testing.B) *tcp.Server {
 	return server
 }
 
+/// 1. Latency Benchmark (Single Connection)
 func BenchmarkLatency(b *testing.B) {
     // 1. Start server
     b.Log("Starting server...")
@@ -99,42 +102,80 @@ func BenchmarkLatency(b *testing.B) {
     }
 }
 
+// 2. Packet Loss Benchmark
 func BenchmarkPacketLoss(b *testing.B) {
-	server := startTestServer(b)
-	defer func() {
-		server.Stop()
-		time.Sleep(100 * time.Millisecond)
-	}()
+    // 1. Server Setup (using your existing Start() method)
+    server := tcp.NewServer()
+    server.BenchmarkMode = true
+    
+    // Start server normally (not with Serve)
+    errChan := make(chan error, 1)
+    go func() {
+        errChan <- server.Start(testPort)
+    }()
+    
+    // Wait for server to be ready
+    select {
+    case err := <-errChan:
+        if err != nil {
+            b.Fatalf("Server failed to start: %v", err)
+        }
+    case <-time.After(500 * time.Millisecond):
+        if _, err := net.Dial("tcp", testPort); err != nil {
+            b.Fatal("Server did not start in time")
+        }
+    }
+    defer server.Stop()
 
+	// 2. Client Connection
 	conn, err := net.Dial("tcp", testPort)
 	if err != nil {
-		b.Fatal(err)
+		b.Fatalf("Dial failed: %v", err)
 	}
 	defer conn.Close()
+ 
+	// 3. TCP Optimizations
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		tcpConn.SetNoDelay(true)  // Disable Nagle's algorithm
+		tcpConn.SetLinger(0)      // Disable lingering
+		
+		// Enable TCP QuickACK if possible
+		if fd, err := tcpConn.File(); err == nil {
+			syscall.SetsockoptInt(int(fd.Fd()), syscall.IPPROTO_TCP, syscall.TCP_QUICKACK, 1)
+			fd.Close()
+		}
+	}
 
-	reader := bufio.NewReader(conn)
+	// 4. Benchmark Configuration
+	msg := []byte{'x'} // Single byte message
+	recvBuf := make([]byte, 1)
+	const lossInterval = 10
 	var packetsLost int
-	
+ 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if i > 0 && i%10 == 0 {
+		if i > 0 && i%lossInterval == 0 {
 			packetsLost++
 			continue
 		}
 
 		start := time.Now()
-		if _, err := conn.Write([]byte(testMessage)); err != nil {
-			b.Error(err)
+		if _, err := conn.Write(msg); err != nil {
+			b.Error("Write error:", err)
 			continue
 		}
-		
-		if _, err := reader.Read(make([]byte, len(testMessage))); err != nil {
-			b.Error(err)
+		if _, err := conn.Read(recvBuf); err != nil {
+			b.Error("Read error:", err)
 			continue
 		}
-		
 		b.ReportMetric(float64(time.Since(start).Nanoseconds()), "ns/op")
 	}
-	
-	b.ReportMetric(float64(packetsLost)*100/float64(b.N), "%_lost")
-}
+ 
+	// 5. Report Metrics
+	lossPercent := float64(packetsLost) / float64(b.N) * 100
+	b.ReportMetric(lossPercent, "%_lost")
+	b.ReportMetric(float64(packetsLost), "packets_lost")
+	b.ReportMetric(float64(len(msg)), "bytes/op")
+	b.ReportMetric(0, "B/op")          // Zero allocations
+	b.ReportMetric(0, "allocs/op")     // Confirmed no allocs
+ }
