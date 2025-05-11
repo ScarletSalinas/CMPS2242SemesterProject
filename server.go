@@ -119,6 +119,12 @@ func (s *Server) startChatLoop(client *Client,  inputChan chan string) {
 
 // handleMessage processes a single message/command
 func (s *Server) handleMessage(client *Client, msg string) {
+	client.mu.Lock()
+	if client.closed {
+		client.mu.Unlock()
+		return
+	}
+	client.mu.Unlock()
 
 	// Check
 	if _, err := client.Conn.Write([]byte("> ")); err != nil {
