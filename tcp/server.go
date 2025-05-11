@@ -1,4 +1,4 @@
-package main
+package tcp
 
 import(
 		"fmt"
@@ -9,16 +9,18 @@ import(
 		"time"
 )
 
-
 type Server struct {
 	clients   map[*Client]bool
 	clientsMu sync.Mutex
+	listener  net.Listener
+	running   bool
 }
 
 // NewServer creates a new chat server instance
 func NewServer() *Server {
 	return &Server{
 		clients: make(map[*Client]bool),
+		running: false,
 	}
 }
 
@@ -28,18 +30,23 @@ func (s *Server) Start(address string) error {
 	if err != nil {
 		return err
 	}
-	defer listener.Close()
+	
+	s.listener = listener
+	s.running = true
 
-	log.Printf("Chat server running on %s", listener.Addr())
-
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			log.Printf("Connection error: %v", err)
-			continue
+	go func() {
+		for s.running {
+			conn, err := listener.Accept()
+			if err != nil {
+				if s.running {
+					log.Printf("Accept error: %v", err)
+				}
+				continue
+			}
+			go s.handleConnection(conn)
 		}
-		go s.handleConnection(conn)
-	}
+	}()
+	return nil
 }
 
 // handleConnection manages a new client connection
@@ -52,31 +59,48 @@ func (s *Server) handleConnection(conn net.Conn) {
         }
     }()
 
-	inputChan := make(chan string)
-	conn.SetDeadline(time.Now().Add(5 * time.Minute)) // Timeout
-	client := newClient(conn)
-	defer func() {
-		s.cleanupClient(client)
-		close(inputChan)
-		conn.Close()
-	}()
+	client := NewClient(conn)
+	defer s.cleanupClient(client)
 
-	// Get username
+	// Echo test for benchmarks
+	buf := make([]byte, 1024)
+	n, err := conn.Read(buf)
+	if err != nil {
+		return
+	}
+	conn.Write(buf[:n])
+
+	// Normal chat flow
 	if err := s.registerClient(client); err != nil {
 		return
 	}
 
-	// Start chat session
-	s.broadcastSystemMessage(fmt.Sprintf("\033[1;33m%s has joined the chat\033[0m", client.Username))
-	client.sendMessage(fmt.Sprintf("\033[1;32mWelcome, %s!\033[0m Type /help for commands\n", client.Username))
+	s.broadcastSystemMessage(fmt.Sprintf("\033[1;33m%s joined\033[0m", client.Username))
+	client.SendMessage(fmt.Sprintf("\033[1;32mWelcome %s!\033[0m", client.Username))
+
+	inputChan := make(chan string)
+	defer close(inputChan)
+
+	go func() {
+		for {
+			msg, err := client.ReadInput()
+			if err != nil {
+				break
+			}
+			inputChan <- msg
+		}
+	}()
+
+	for msg := range inputChan {
+		s.handleMessage(client, msg)
+	}
 	
-	s.startChatLoop(client, inputChan)
 }
 
 // registerClient: gets and sets the client's username
 func (s *Server) registerClient(client *Client) error {
 	client.prompt("\033[1;36mEnter your username: \033[0m")
-	username, err := client.readInput()
+	username, err := client.ReadInput()
 
 	if err != nil {
 		return err
@@ -97,7 +121,7 @@ func (s *Server) startChatLoop(client *Client,  inputChan chan string) {
 	// Input reader goroutine
 	go func() {
 		for {
-			msg, err := client.readInput()
+			msg, err := client.ReadInput()
 			if err != nil {
 				log.Printf("Read error from %s: %v", client.Username, err)
 				close(inputChan)
@@ -138,13 +162,13 @@ func (s *Server) handleMessage(client *Client, msg string) {
 		return  // Exit the handler after quitting
 
 	case msg == "/help":
-		client.sendMessage("\033[1;35mAvailable commands:\n/help    - Show help\n/who     - List online users\n/quit    - Disconnect from chat\033[0m")
+		client.SendMessage("\033[1;35mAvailable commands:\n/help    - Show help\n/who     - List online users\n/quit    - Disconnect from chat\033[0m")
 
 	case msg == "/who":
 		s.listUsers(client)
 
 	case strings.HasPrefix(msg, "/"):
-		client.sendMessage("\033[1;31mUnknown command. Try /help\033[0m")
+		client.SendMessage("\033[1;31mUnknown command. Try /help\033[0m")
 
 	default:
 		chatMsg := fmt.Sprintf("\033[1;34m[%s]\033[0m \033[1;36m%s\033[0m: %s", time.Now().Format("15:04"), client.Username, msg)
@@ -152,7 +176,7 @@ func (s *Server) handleMessage(client *Client, msg string) {
 	}
 
 	if time.Since(client.LastMessage) < 1*time.Second {
-		client.sendMessage("\033[1;31mMessage rate limit exceeded\033[0m")
+		client.SendMessage("\033[1;31mMessage rate limit exceeded\033[0m")
 		return
 	}
 	client.LastMessage = time.Now()
@@ -172,7 +196,7 @@ func (s *Server) listUsers(client *Client) {
         c.mu.Unlock()
     }
     
-	client.sendMessage(fmt.Sprintf("\033[1;35mOnline users: \033[1;33m%s\033[0m", strings.Join(users, ", ")))
+	client.SendMessage(fmt.Sprintf("\033[1;35mOnline users: \033[1;33m%s\033[0m", strings.Join(users, ", ")))
 }
 
 // broadcast sends a message to all clients
@@ -182,7 +206,7 @@ func (s *Server) broadcast(sender *Client, msg string) {
 
 	for client := range s.clients {
 		if client != sender {
-			client.sendMessage(msg)
+			client.SendMessage(msg)
 		}
 	}
 }
@@ -192,7 +216,7 @@ func (s *Server) broadcastSystemMessage(msg string) {
 	defer s.clientsMu.Unlock()
 
 	for client := range s.clients {
-		client.sendMessage(msg)
+		client.SendMessage(msg)
 	}
 }
 
@@ -206,7 +230,7 @@ func (s *Server) cleanupClient(client *Client) {
         leaveMsg := fmt.Sprintf("\033[1;31m%s has left the chat\033[0m", client.Username)
         for remainingClient := range s.clients {
             if remainingClient != client {
-                remainingClient.sendMessage(leaveMsg)
+                remainingClient.SendMessage(leaveMsg)
             }
         }
 
@@ -228,7 +252,7 @@ func (s *Server) Stop() {
     defer s.clientsMu.Unlock()
 
     for client := range s.clients {
-        client.sendMessage("Server shutting down...")
+        client.SendMessage("Server shutting down...")
     }
 
 	time.Sleep(5*time.Second)
@@ -236,4 +260,5 @@ func (s *Server) Stop() {
 		client.Conn.Close()
 	}
 }
+
 

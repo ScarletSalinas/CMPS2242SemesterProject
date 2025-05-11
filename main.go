@@ -5,6 +5,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"github.com/ScarletSalinas/SemesterProject/tcp"
 )
 
 func main() {
@@ -20,7 +21,7 @@ func main() {
 	address := ":" + portStr
 
 	// Start server
-	server := NewServer()
+	server := tcp.NewServer()
 	if err := server.Start(address); err != nil {
 		log.Fatal(err)
 	}

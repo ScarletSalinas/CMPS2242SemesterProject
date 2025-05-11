@@ -1,13 +1,12 @@
-package main
+package tcp
 
 import (
-	"bufio"
-	"fmt"
-	"log"
-	"net"
-	"strings"
-	"sync"
-	"time"
+		"bufio"
+		"fmt"
+		"net"
+		"strings"
+		"sync"
+		"time"
 )
 
 // Client represents a connected chat user
@@ -26,9 +25,42 @@ type syncWriter struct {
 	conn net.Conn
 }
 
-// Creates a new thread-safe writer for a connection
-func newSyncWriter(conn net.Conn) *syncWriter {
-	return &syncWriter{conn: conn}
+// newClient creates and initializes a new Client
+func NewClient(conn net.Conn) *Client {
+	return &Client{
+		Conn:   conn,
+		writer: newSyncWriter(conn),
+	}
+}
+
+// prompt sends a prompt to the client 
+func (c *Client) prompt(text string) error {
+	return c.writer.write(text)
+}
+
+// sendMessage safely writes a message to the client's connection
+func (c *Client) SendMessage(msg string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return fmt.Errorf("connection closed")
+	}
+	return c.writer.writeMessage(msg)
+}
+
+// readInput reads a line of input from the client
+func (c *Client) ReadInput() (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return "", fmt.Errorf("connection closed")
+	}
+	
+	input, err := bufio.NewReader(c.Conn).ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(input), nil
 }
 
 func (c *Client) Close() {
@@ -39,6 +71,12 @@ func (c *Client) Close() {
         c.closed = true
     }
 }
+
+// Creates a new thread-safe writer for a connection
+func newSyncWriter(conn net.Conn) *syncWriter {
+	return &syncWriter{conn: conn}
+}
+
 
 // Prompts-no newline
 func (w *syncWriter) write(text string) error {
@@ -76,33 +114,3 @@ func (w *syncWriter) writeMessage(msg string) error {
 	return err
 }
 
-// newClient creates and initializes a new Client
-func newClient(conn net.Conn) *Client {
-	return &Client{
-		Conn:   conn,
-		writer: newSyncWriter(conn),
-	}
-}
-
-// prompt sends a prompt to the client 
-func (c *Client) prompt(text string) error {
-	return c.writer.write(text)
-}
-
-// sendMessage safely writes a message to the client's connection
-func (c *Client) sendMessage(msg string) error {
-	return c.writer.writeMessage(msg)
-}
-
-// readInput reads a line of input from the client
-func (c *Client) readInput() (string, error) {
-	reader := bufio.NewReader(c.Conn)
-	input, err := reader.ReadString('\n')
-	if err != nil {
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			log.Printf("Timeout: %v", c.Username)	// Network error
-		}
-		return "", err
-	}
-	return strings.TrimSpace(input), nil
-}
