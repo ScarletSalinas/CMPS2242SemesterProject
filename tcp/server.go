@@ -14,6 +14,7 @@ type Server struct {
 	clientsMu sync.Mutex
 	listener  net.Listener
 	running   bool
+	benchmarkMode bool
 }
 
 // NewServer creates a new chat server instance
@@ -64,6 +65,18 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 	// Echo test for benchmarks
 	buf := make([]byte, 1024)
+
+	// Simple echo handler for benchmarks
+	if s.benchmarkMode {
+		for {
+			n, err := conn.Read(buf)
+			if err != nil {
+				return
+			}
+			conn.Write(buf[:n])
+		}
+	}
+
 	n, err := conn.Read(buf)
 	if err != nil {
 		return
