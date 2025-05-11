@@ -87,23 +87,13 @@ func (s *Server) handleConnection(conn net.Conn) {
 	s.broadcastSystemMessage(fmt.Sprintf("\033[1;33m%s joined\033[0m", client.Username))
 	client.SendMessage(fmt.Sprintf("\033[1;32mWelcome %s!\033[0m", client.Username))
 
-	inputChan := make(chan string)
-	defer close(inputChan)
-
-	go func() {
-		for {
-			msg, err := client.ReadInput()
-			if err != nil {
-				break
-			}
-			inputChan <- msg
+	for {
+		msg, err := client.ReadInput()
+		if err != nil {
+			break
 		}
-	}()
-
-	for msg := range inputChan {
 		s.handleMessage(client, msg)
 	}
-	
 }
 
 // registerClient: gets and sets the client's username
