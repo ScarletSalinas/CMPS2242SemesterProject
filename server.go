@@ -119,10 +119,18 @@ func (s *Server) startChatLoop(client *Client,  inputChan chan string) {
 
 // handleMessage processes a single message/command
 func (s *Server) handleMessage(client *Client, msg string) {
+
+	// Check
+	if _, err := client.Conn.Write([]byte("> ")); err != nil {
+        s.cleanupClient(client)
+        return
+    }
+
 	switch {
 	case msg == "/quit":
-		client.sendMessage("\033[1;31mYou left the chat\033[0m")
-		client.Conn.Close()
+		s.broadcastSystemMessage(fmt.Sprintf("\033[1;31m%s has left the chat\033[0m", client.Username))
+		s.cleanupClient(client)
+		return  // Exit the handler after quitting
 
 	case msg == "/help":
 		client.sendMessage("\033[1;35mAvailable commands:\n/help    - Show help\n/who     - List online users\n/quit    - Disconnect from chat\033[0m")
@@ -189,6 +197,14 @@ func (s *Server) cleanupClient(client *Client) {
         s.broadcastSystemMessage(fmt.Sprintf("\033[1;31m%s has left the chat\033[0m", client.Username))
         log.Printf("[%s] %s@%s disconnected (%d active connections)", time.Now().Format("2006-01-02 15:04:05"),client.Username, client.Conn.RemoteAddr().String(), len(s.clients))
     }
+
+	// Broadcast leave message to ALL remaining clients
+	msg := fmt.Sprintf("\033[1;31m%s has left the chat\033[0m", client.Username)
+	for remainingClient := range s.clients {
+		if err := remainingClient.sendMessage(msg); err != nil {
+			log.Printf("Failed to notify %s: %v", remainingClient.Username, err)
+		}
+	}
 }
 
 // Graceful shutdown
