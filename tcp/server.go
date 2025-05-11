@@ -1,31 +1,27 @@
 package tcp
 
-import(
-		"fmt"
-		"log"
-		"net"
-		"strings"
-		"sync"
-		"time"
+import (
+	"fmt"
+	"log"
+	"net"
+	"strings"
+	"sync"
+	"time"
 )
 
 type Server struct {
-	clients   		map[*Client]bool
-	clientsMu 		sync.Mutex
-	listener  		net.Listener
-	running   		bool
-	BenchmarkMode  	bool
+	clients   map[*Client]bool
+	clientsMu sync.Mutex
+	listener  net.Listener
+	running   bool
 }
 
-// NewServer creates a new chat server instance
 func NewServer() *Server {
 	return &Server{
 		clients: make(map[*Client]bool),
-		running: false,
 	}
 }
 
-// Start begins listening for connections
 func (s *Server) Start(address string) error {
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
@@ -50,35 +46,16 @@ func (s *Server) Start(address string) error {
 	return nil
 }
 
-// handleConnection manages a new client connection
 func (s *Server) handleConnection(conn net.Conn) {
-
-	// Panic recovery
 	defer func() {
-        if r := recover(); r != nil {
-            log.Printf("Recovered from panic in handler: %v", r)
-        }
-    }()
+		if r := recover(); r != nil {
+			log.Printf("Recovered from panic in handler: %v", r)
+		}
+	}()
 
 	client := NewClient(conn)
 	defer s.cleanupClient(client)
-	buf := make([]byte, 1024)
-	conn.SetDeadline(time.Time{}) // Remove any read/write timeouts
-	
-	// Benchmark mode handling (simple echo)
-	if s.BenchmarkMode {
-		conn.SetDeadline(time.Time{}) // Remove any read/write timeouts
-		client.writer.benchmarkMode = true // Enable optimized writing
-		for {
-			n, err := conn.Read(buf)
-			if err != nil {
-				return
-			}
-			if _, err := conn.Write(buf[:n]); err != nil {
-				return
-			}
-		}
-    }
+	conn.SetDeadline(time.Time{})
 
 	// Normal chat flow
 	if err := s.registerClient(client); err != nil {
@@ -97,11 +74,9 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}
 }
 
-// registerClient: gets and sets the client's username
 func (s *Server) registerClient(client *Client) error {
 	client.prompt("\033[1;36mEnter your username: \033[0m")
 	username, err := client.ReadInput()
-
 	if err != nil {
 		return err
 	}
@@ -114,7 +89,6 @@ func (s *Server) registerClient(client *Client) error {
 	return nil
 }
 
-// handleMessage processes a single message/command
 func (s *Server) handleMessage(client *Client, msg string) {
 	client.mu.Lock()
 	if client.closed {
@@ -123,16 +97,15 @@ func (s *Server) handleMessage(client *Client, msg string) {
 	}
 	client.mu.Unlock()
 
-	// Check
 	if _, err := client.Conn.Write([]byte("> ")); err != nil {
-        s.cleanupClient(client)
-        return
-    }
+		s.cleanupClient(client)
+		return
+	}
 
 	switch {
 	case msg == "/quit":
 		s.broadcastSystemMessage(fmt.Sprintf("\033[1;31m%s has left the chat\033[0m", client.Username))
-		return  // Exit the handler after quitting
+		return
 
 	case msg == "/help":
 		client.SendMessage("\033[1;35mAvailable commands:\n/help    - Show help\n/who     - List online users\n/quit    - Disconnect from chat\033[0m")
@@ -155,7 +128,6 @@ func (s *Server) handleMessage(client *Client, msg string) {
 	client.LastMessage = time.Now()
 }
 
-// listUsers sends the online user list to a client
 func (s *Server) listUsers(client *Client) {
 	s.clientsMu.Lock()
 	defer s.clientsMu.Unlock()
@@ -163,16 +135,15 @@ func (s *Server) listUsers(client *Client) {
 	var users []string
 	for c := range s.clients {
 		c.mu.Lock()
-        if !c.closed {
-            users = append(users, c.Username)
-        }
-        c.mu.Unlock()
-    }
-    
+		if !c.closed {
+			users = append(users, c.Username)
+		}
+		c.mu.Unlock()
+	}
+	
 	client.SendMessage(fmt.Sprintf("\033[1;35mOnline users: \033[1;33m%s\033[0m", strings.Join(users, ", ")))
 }
 
-// broadcast sends a message to all clients
 func (s *Server) broadcast(sender *Client, msg string) {
 	s.clientsMu.Lock()
 	defer s.clientsMu.Unlock()
@@ -193,53 +164,42 @@ func (s *Server) broadcastSystemMessage(msg string) {
 	}
 }
 
-// cleanupClient removes a disconnected client
 func (s *Server) cleanupClient(client *Client) {
-	// Broadcast while client is still in map
-    s.clientsMu.Lock()
-	defer s.clientsMu.Unlock()    
+	s.clientsMu.Lock()
+	defer s.clientsMu.Unlock()
 
 	if _, exists := s.clients[client]; exists {
-        leaveMsg := fmt.Sprintf("\033[1;31m%s has left the chat\033[0m", client.Username)
-        for remainingClient := range s.clients {
-            if remainingClient != client {
-                remainingClient.SendMessage(leaveMsg)
-            }
-        }
+		leaveMsg := fmt.Sprintf("\033[1;31m%s has left the chat\033[0m", client.Username)
+		for remainingClient := range s.clients {
+			if remainingClient != client {
+				remainingClient.SendMessage(leaveMsg)
+			}
+		}
 
-		 // Cleanup
-		 delete(s.clients, client)
-		 client.Close()
-		 log.Printf("[%s] %s@%s disconnected (%d active connections)", 
-			 time.Now().Format("2006-01-02 15:04:05"),
-			 client.Username, 
-			 client.Conn.RemoteAddr().String(), 
-			 len(s.clients))
+		delete(s.clients, client)
+		client.Close()
+		log.Printf("[%s] %s@%s disconnected (%d active connections)", 
+			time.Now().Format("2006-01-02 15:04:05"),
+			client.Username, 
+			client.Conn.RemoteAddr().String(), 
+			len(s.clients))
 	}
-    
 }
 
-// Graceful shutdown
-func (s *Server) Stop() {
-    s.clientsMu.Lock()
-    defer s.clientsMu.Unlock()
-
-    // Optional: Notify clients (without waiting for sends to complete)
-    for client := range s.clients {
-        go client.SendMessage("Server shutting down...")
-    }
-
-    // Close all connections immediately
-    for client := range s.clients {
-        client.Conn.Close()  // This will interrupt any blocked operations
-    }
-    
-    // Mark server as stopped
-    s.running = false
-    
-    // Close the listener to stop accepting new connections
-    if s.listener != nil {
-        s.listener.Close()
-    }
+func (s *Server) Stop() error {
+	s.clientsMu.Lock()
+	defer s.clientsMu.Unlock()
+	
+	s.running = false
+	
+	if s.listener != nil {
+		s.listener.Close()
+	}
+	
+	for client := range s.clients {
+		client.Close()
+		delete(s.clients, client)
+	}
+	
+	return nil
 }
-
