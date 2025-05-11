@@ -44,6 +44,14 @@ func (s *Server) Start(port string) error {
 
 // handleConnection manages a new client connection
 func (s *Server) handleConnection(conn net.Conn) {
+
+	// Panic recovery
+	defer func() {
+        if r := recover(); r != nil {
+            log.Printf("Recovered from panic in handler: %v", r)
+        }
+    }()
+
 	inputChan := make(chan string)
 	conn.SetDeadline(time.Now().Add(5 * time.Minute)) // Timeout
 	client := newClient(conn)
