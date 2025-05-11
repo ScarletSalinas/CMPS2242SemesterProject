@@ -42,10 +42,9 @@ func (s *Server) Start(port string) error {
 	}
 }
 
-var inputChan = make(chan string)
-
 // handleConnection manages a new client connection
 func (s *Server) handleConnection(conn net.Conn) {
+	inputChan := make(chan string)
 	conn.SetDeadline(time.Now().Add(5 * time.Minute)) // Timeout
 	client := newClient(conn)
 	defer func() {
@@ -66,7 +65,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 	s.startChatLoop(client)
 }
 
-// registerClient gets and sets the client's username
+// registerClient: gets and sets the client's username
 func (s *Server) registerClient(client *Client) error {
 	client.prompt("\033[1;36mEnter your username: \033[0m")
 	username, err := client.readInput()
@@ -83,7 +82,7 @@ func (s *Server) registerClient(client *Client) error {
 	return nil
 }
 
-// startChatLoop handles the main chat session for a client
+// startChatLoop: handles the main chat session for a client
 func (s *Server) startChatLoop(client *Client) {
 	defer close(inputChan)
 
@@ -101,6 +100,7 @@ func (s *Server) startChatLoop(client *Client) {
 	}()
 
 	// Message processor
+	client.Conn.SetDeadline(time.Now().Add(5 * time.Minute))  // timeout renewal
 	for msg := range inputChan {
 		if len(msg) == 0 {
 			continue
@@ -129,6 +129,12 @@ func (s *Server) handleMessage(client *Client, msg string) {
 		chatMsg := fmt.Sprintf("\033[1;34m[%s]\033[0m \033[1;36m%s\033[0m: %s", time.Now().Format("15:04"), client.Username, msg)
 		s.broadcast(client, chatMsg)
 	}
+
+	if time.Since(client.LastMessage) < 1*time.Second {
+		client.sendMessage("\033[1;31mMessage rate limit exceeded\033[0m")
+		return
+	}
+	client.LastMessage = time.Now()
 }
 
 // listUsers sends the online user list to a client
@@ -171,7 +177,7 @@ func (s *Server) cleanupClient(client *Client) {
 
 	if _, exists := s.clients[client]; exists {
         delete(s.clients, client)
-        defer client.Conn.Close()
+		client.Conn.Close() // Immediate close
         s.broadcastSystemMessage(fmt.Sprintf("\033[1;31m%s has left the chat\033[0m", client.Username))
         log.Printf("%s disconnected (%d remaining)", client.Username, len(s.clients))
     }
@@ -181,9 +187,14 @@ func (s *Server) cleanupClient(client *Client) {
 func (s *Server) Stop() {
     s.clientsMu.Lock()
     defer s.clientsMu.Unlock()
+
     for client := range s.clients {
         client.sendMessage("Server shutting down...")
-        client.Conn.Close()
     }
+
+	time.Sleep(5*time.Second)
+	for client := range s.clients {
+		client.Conn.Close()
+	}
 }
 

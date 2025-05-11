@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"log"
 	"net"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Client represents a connected chat user
@@ -13,6 +15,7 @@ type Client struct {
 	Conn     net.Conn
 	Username string
 	writer   *syncWriter // private thread-safe writer
+	LastMessage time.Time
 }
 
 // syncWriter provides thread-safe writing with line clearing
@@ -47,6 +50,10 @@ func (w *syncWriter) write(text string) error {
 func (w *syncWriter) writeMessage(msg string) error {
 	w.Lock()
 	defer w.Unlock()
+
+	if _, err := w.conn.Write([]byte("\033[2K\r")); err != nil {
+		return fmt.Errorf("clear failed: %w", err)
+	}
 	
 	// Clear line, write message, then newline
 	if _, err := w.conn.Write([]byte("\033[2K\r" + msg + "\n")); err != nil {
