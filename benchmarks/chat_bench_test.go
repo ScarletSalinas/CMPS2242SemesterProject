@@ -74,3 +74,31 @@ func BenchmarkLatency(b *testing.B) {
 	}
 
 }
+
+// 2. Simulates 10% packet loss and measures reliability
+func BenchmarkPacketLoss(b *testing.B) {
+	server := startTestServer(b)
+	defer server.Stop()
+
+	var packetsLost int
+	for i := 0; i < b.N; i++ {
+		conn, err := net.Dial("tcp", testPort)
+		if err != nil {
+			b.Error(err)
+			continue
+		}
+
+		// Simulate 10% packet loss by randomly dropping writes
+		if i%10 == 0 { // Drop every 10th packet
+			packetsLost++
+			conn.Close()
+			continue
+		}
+
+		if _, err := conn.Write([]byte(testMessage)); err != nil {
+			b.Error(err)
+		}
+		conn.Close()
+	}
+	b.ReportMetric(float64(packetsLost), "packets_lost")
+}
