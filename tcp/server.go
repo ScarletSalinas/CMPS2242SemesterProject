@@ -63,20 +63,21 @@ func (s *Server) handleConnection(conn net.Conn) {
 	client := NewClient(conn)
 	defer s.cleanupClient(client)
 	buf := make([]byte, 1024)
-
-	 // Benchmark mode handling (simple echo)
-	 if s.BenchmarkMode {
+	conn.SetDeadline(time.Time{}) // Remove any read/write timeouts
+	
+	// Benchmark mode handling (simple echo)
+	if s.BenchmarkMode {
 		conn.SetDeadline(time.Time{}) // Remove any read/write timeouts
 		client.writer.benchmarkMode = true // Enable optimized writing
 		for {
-            n, err := conn.Read(buf)
-            if err != nil {
-                return
-            }
-            if _, err := conn.Write(buf[:n]); err != nil {
-                return
+			n, err := conn.Read(buf)
+			if err != nil {
+				return
 			}
-        }
+			if _, err := conn.Write(buf[:n]); err != nil {
+				return
+			}
+		}
     }
 
 	// Normal chat flow
