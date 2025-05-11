@@ -1,10 +1,9 @@
 package benchmarks
 
 import (
+	"bufio"
 	"context"
-	"errors"
 	"net"
-	"sync"
 	"testing"
 	"time"
 	"github.com/ScarletSalinas/SemesterProject/tcp"
@@ -18,7 +17,7 @@ const (
 // startTestServer starts the TCP server in benchmark mode (echo only)
 func startTestServer(b *testing.B) *tcp.Server {
 	server := tcp.NewServer()
-	server.benchmarkMode = true 
+	server.BenchMarkMode = true 
 	go func() {
 		if err := server.Start(testPort); err != nil {
 			b.Fatalf("Failed to start server: %v", err)
