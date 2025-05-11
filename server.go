@@ -46,10 +46,12 @@ var inputChan = make(chan string)
 
 // handleConnection manages a new client connection
 func (s *Server) handleConnection(conn net.Conn) {
+	conn.SetDeadline(time.Now().Add(5 * time.Minute)) // Timeout
 	client := newClient(conn)
 	defer func() {
 		s.cleanupClient(client)
 		close(inputChan)
+		conn.Close()
 	}()
 
 	// Get username
@@ -169,7 +171,19 @@ func (s *Server) cleanupClient(client *Client) {
 
 	if _, exists := s.clients[client]; exists {
         delete(s.clients, client)
-        client.Conn.Close()
-        s.broadcastSystemMessage(fmt.Sprintf("%s disconnected", client.Username))
+        defer client.Conn.Close()
+        s.broadcastSystemMessage(fmt.Sprintf("\033[1;31m%s has left the chat\033[0m", client.Username))
+        log.Printf("%s disconnected (%d remaining)", client.Username, len(s.clients))
     }
 }
+
+// Graceful shutdown
+func (s *Server) Stop() {
+    s.clientsMu.Lock()
+    defer s.clientsMu.Unlock()
+    for client := range s.clients {
+        client.sendMessage("Server shutting down...")
+        client.Conn.Close()
+    }
+}
+
