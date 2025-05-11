@@ -62,7 +62,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 	s.broadcastSystemMessage(fmt.Sprintf("\033[1;33m%s has joined the chat\033[0m", client.Username))
 	client.sendMessage(fmt.Sprintf("\033[1;32mWelcome, %s!\033[0m Type /help for commands\n", client.Username))
 	
-	s.startChatLoop(client)
+	s.startChatLoop(client, inputChan)
 }
 
 // registerClient: gets and sets the client's username
@@ -83,7 +83,7 @@ func (s *Server) registerClient(client *Client) error {
 }
 
 // startChatLoop: handles the main chat session for a client
-func (s *Server) startChatLoop(client *Client) {
+func (s *Server) startChatLoop(client *Client,  inputChan chan string) {
 	defer close(inputChan)
 
 	// Input reader goroutine
@@ -179,7 +179,7 @@ func (s *Server) cleanupClient(client *Client) {
         delete(s.clients, client)
 		client.Conn.Close() // Immediate close
         s.broadcastSystemMessage(fmt.Sprintf("\033[1;31m%s has left the chat\033[0m", client.Username))
-        log.Printf("%s disconnected (%d remaining)", client.Username, len(s.clients))
+        log.Printf("[%s] %s@%s disconnected (%d active connections)", time.Now().Format("2006-01-02 15:04:05"),client.Username, client.Conn.RemoteAddr().String(), len(s.clients))
     }
 }
 
