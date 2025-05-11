@@ -66,7 +66,9 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 	 // Benchmark mode handling (simple echo)
 	 if s.BenchmarkMode {
-        for {
+		conn.SetDeadline(time.Time{}) // Remove any read/write timeouts
+		client.writer.benchmarkMode = true // Enable optimized writing
+		for {
             n, err := conn.Read(buf)
             if err != nil {
                 return
@@ -119,33 +121,6 @@ func (s *Server) registerClient(client *Client) error {
 	s.clientsMu.Unlock()
 
 	return nil
-}
-
-// startChatLoop: handles the main chat session for a client
-func (s *Server) startChatLoop(client *Client,  inputChan chan string) {
-	defer close(inputChan)
-
-	// Input reader goroutine
-	go func() {
-		for {
-			msg, err := client.ReadInput()
-			if err != nil {
-				log.Printf("Read error from %s: %v", client.Username, err)
-				close(inputChan)
-				return
-			}
-			inputChan <- msg
-		}
-	}()
-
-	// Message processor
-	client.Conn.SetDeadline(time.Now().Add(5 * time.Minute))  // timeout renewal
-	for msg := range inputChan {
-		if len(msg) == 0 {
-			continue
-		}
-		s.handleMessage(client, msg)
-	}
 }
 
 // handleMessage processes a single message/command

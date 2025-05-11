@@ -23,14 +23,16 @@ type Client struct {
 type syncWriter struct {
 	sync.Mutex
 	conn net.Conn
+    benchmarkMode bool
 }
 
 // newClient creates and initializes a new Client
 func NewClient(conn net.Conn) *Client {
-	return &Client{
-		Conn:   conn,
-		writer: newSyncWriter(conn),
-	}
+    conn.SetDeadline(time.Time{})
+    return &Client{
+        Conn:   conn,
+        writer: &syncWriter{conn: conn, benchmarkMode: false},
+    }
 }
 
 // prompt sends a prompt to the client 
@@ -72,12 +74,6 @@ func (c *Client) Close() {
     }
 }
 
-// Creates a new thread-safe writer for a connection
-func newSyncWriter(conn net.Conn) *syncWriter {
-	return &syncWriter{conn: conn}
-}
-
-
 // Prompts-no newline
 func (w *syncWriter) write(text string) error {
 	w.Lock()
@@ -96,21 +92,25 @@ func (w *syncWriter) write(text string) error {
 }
 
 // Method for chat messages-adds newline
+// Simplified writeMessage for benchmarks
 func (w *syncWriter) writeMessage(msg string) error {
-	w.Lock()
-	defer w.Unlock()
-
-	if _, err := w.conn.Write([]byte("\033[2K\r")); err != nil {
-		return fmt.Errorf("clear failed: %w", err)
-	}
-	
-	// Clear line, write message, then newline
-	if _, err := w.conn.Write([]byte("\033[2K\r" + msg + "\n")); err != nil {
-		return err
-	}
-	
-	// Re-draw prompt if needed
-	_, err := w.conn.Write([]byte("> "))
-	return err
+    w.Lock()
+    defer w.Unlock()
+    
+    if w.benchmarkMode {
+        // Bypass all ANSI formatting for benchmarks
+        _, err := w.conn.Write([]byte(msg + "\n"))
+        return err
+    }
+    
+    // Original ANSI-formatted writing
+    if _, err := w.conn.Write([]byte("\033[2K\r")); err != nil {
+        return err
+    }
+    if _, err := w.conn.Write([]byte(msg + "\n")); err != nil {
+        return err
+    }
+    _, err := w.conn.Write([]byte("> "))
+    return err
 }
 
