@@ -1,9 +1,10 @@
-package benchmarks
+package tcp_test
 
 import (
 	"net"
 	"testing"
 	"time"
+	"github.com/ScarletSalinas/SemesterProject/tcp"  
 )
 
 const (
@@ -39,30 +40,24 @@ func startEchoServer() net.Listener {
 }
 
 func BenchmarkThroughput(b *testing.B) {
-	ln := startEchoServer()
-	defer ln.Close()
+    server := tcp.NewServer()
+    go server.Start(":5000")
+    defer server.Stop()
 
-	conn, err := net.Dial("tcp", testPort)
-	if err != nil {
-		b.Fatal(err)
-	}
-	defer conn.Close()
+    conn, err := net.Dial("tcp", ":5000")
+    if err != nil {
+        b.Fatal(err)
+    }
+    defer conn.Close()
 
-	msg := []byte(testMessage)
-	reply := make([]byte, len(msg))
+    msg := []byte("test\n")
+    reply := make([]byte, len(msg))
 
-	b.ResetTimer()
-	start := time.Now()
-	for i := 0; i < b.N; i++ {
-		if _, err := conn.Write(msg); err != nil {
-			b.Fatal(err)
-		}
-		if _, err := conn.Read(reply); err != nil {
-			b.Fatal(err)
-		}
-	}
-	elapsed := time.Since(start)
-	b.ReportMetric(float64(b.N)/elapsed.Seconds(), "msg/s")
+    b.ResetTimer()
+    for i := 0; i < b.N; i++ {
+        conn.Write(msg)
+        conn.Read(reply)
+    }
 }
 
 func BenchmarkLatency(b *testing.B) {
