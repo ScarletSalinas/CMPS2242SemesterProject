@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"log"
 	"net"
 	"strings"
 	"sync"
@@ -80,6 +81,9 @@ func (c *Client) readInput() (string, error) {
 	reader := bufio.NewReader(c.Conn)
 	input, err := reader.ReadString('\n')
 	if err != nil {
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			log.Printf("Timeout: %v", c.Username)	// Network error
+		}
 		return "", err
 	}
 	return strings.TrimSpace(input), nil

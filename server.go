@@ -42,10 +42,15 @@ func (s *Server) Start(port string) error {
 	}
 }
 
+var inputChan = make(chan string)
+
 // handleConnection manages a new client connection
 func (s *Server) handleConnection(conn net.Conn) {
 	client := newClient(conn)
-	defer s.cleanupClient(client)
+	defer func() {
+		s.cleanupClient(client)
+		close(inputChan)
+	}()
 
 	// Get username
 	if err := s.registerClient(client); err != nil {
@@ -78,7 +83,6 @@ func (s *Server) registerClient(client *Client) error {
 
 // startChatLoop handles the main chat session for a client
 func (s *Server) startChatLoop(client *Client) {
-	inputChan := make(chan string)
 	defer close(inputChan)
 
 	// Input reader goroutine
@@ -161,10 +165,11 @@ func (s *Server) broadcastSystemMessage(msg string) {
 // cleanupClient removes a disconnected client
 func (s *Server) cleanupClient(client *Client) {
 	s.clientsMu.Lock()
-	delete(s.clients, client)
-	s.clientsMu.Unlock()
+	defer s.clientsMu.Unlock()
 
-	s.broadcastSystemMessage(fmt.Sprintf("\033[1;31m%s has left the chat\033[0m", client.Username))
-	client.Conn.Close()
-	log.Printf("%s disconnected (%d remaining)", client.Username, len(s.clients))
+	if _, exists := s.clients[client]; exists {
+        delete(s.clients, client)
+        client.Conn.Close()
+        s.broadcastSystemMessage(fmt.Sprintf("%s disconnected", client.Username))
+    }
 }
