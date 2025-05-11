@@ -2,7 +2,6 @@ package benchmarks
 
 import (
 	"bufio"
-	"context"
 	"net"
 	"testing"
 	"time"
@@ -14,41 +13,41 @@ const (
 	testMessage = "benchmark\n"
 )
 
-// startTestServer starts the TCP server in benchmark mode (echo only)
+// startTestServer starts the TCP server and returns when ready
 func startTestServer(b *testing.B) *tcp.Server {
 	server := tcp.NewServer()
-	server.BenchMarkMode = true 
+	server.BenchmarkMode = true 
+	
+	errChan := make(chan error, 1)
+	
 	go func() {
-		if err := server.Start(testPort); err != nil {
-			b.Fatalf("Failed to start server: %v", err)
-		}
+		errChan <- server.Start(testPort)
 	}()
 
-	// Wait for server to start (max 500ms)
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-
-	for {
-		select {
-		case <-ctx.Done():
-			b.Fatal("Server did not start in time")
-		default:
-			conn, err := net.Dial("tcp", testPort)
-			if err == nil {
-				conn.Close()
-				return server
-			}
-			time.Sleep(10 * time.Millisecond)
+	// Wait for server to start or fail
+	select {
+	case err := <-errChan:
+		if err != nil {
+			b.Fatalf("Failed to start server: %v", err)
 		}
+	case <-time.After(500 * time.Millisecond):
+		// Verify server is actually running
+		conn, err := net.Dial("tcp", testPort)
+		if err != nil {
+			b.Fatal("Server did not start in time")
+		}
+		conn.Close()
 	}
+
+	return server
 }
 
-// --- Benchmark Tests ---
-
-// 1. Measures average round-trip latency per message
 func BenchmarkLatency(b *testing.B) {
 	server := startTestServer(b)
-	defer server.Stop()
+	defer func() {
+		server.Stop()
+		time.Sleep(100 * time.Millisecond) // Allow cleanup
+	}()
 
 	conn, err := net.Dial("tcp", testPort)
 	if err != nil {
@@ -57,48 +56,62 @@ func BenchmarkLatency(b *testing.B) {
 	defer conn.Close()
 
 	reader := bufio.NewReader(conn)
+	buf := make([]byte, len(testMessage))
+	
 	b.ResetTimer()
-
 	for i := 0; i < b.N; i++ {
+		start := time.Now()
+		
+		if _, err := conn.Write([]byte(testMessage)); err != nil {
+			b.Error(err)
+			continue
+		}
+		
+		if _, err := reader.Read(buf); err != nil {
+			b.Error(err)
+			continue
+		}
+		
+		b.ReportMetric(float64(time.Since(start).Nanoseconds()), "ns/op")
+	}
+}
+
+func BenchmarkPacketLoss(b *testing.B) {
+	server := startTestServer(b)
+	defer func() {
+		server.Stop()
+		time.Sleep(100 * time.Millisecond)
+	}()
+
+	conn, err := net.Dial("tcp", testPort)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer conn.Close()
+
+	reader := bufio.NewReader(conn)
+	var packetsLost int
+	
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if i > 0 && i%10 == 0 {
+			packetsLost++
+			continue
+		}
+
 		start := time.Now()
 		if _, err := conn.Write([]byte(testMessage)); err != nil {
 			b.Error(err)
 			continue
 		}
-		if _, err := reader.ReadString('\n'); err != nil {
+		
+		if _, err := reader.Read(make([]byte, len(testMessage))); err != nil {
 			b.Error(err)
 			continue
 		}
-		elapsed := time.Since(start)
-		b.ReportMetric(float64(elapsed.Nanoseconds()), "ns/op")
+		
+		b.ReportMetric(float64(time.Since(start).Nanoseconds()), "ns/op")
 	}
-
-}
-
-// 2. Simulates 10% packet loss and measures reliability
-func BenchmarkPacketLoss(b *testing.B) {
-	server := startTestServer(b)
-	defer server.Stop()
-
-	var packetsLost int
-	for i := 0; i < b.N; i++ {
-		conn, err := net.Dial("tcp", testPort)
-		if err != nil {
-			b.Error(err)
-			continue
-		}
-
-		// Simulate 10% packet loss by randomly dropping writes
-		if i%10 == 0 { // Drop every 10th packet
-			packetsLost++
-			conn.Close()
-			continue
-		}
-
-		if _, err := conn.Write([]byte(testMessage)); err != nil {
-			b.Error(err)
-		}
-		conn.Close()
-	}
-	b.ReportMetric(float64(packetsLost), "packets_lost")
+	
+	b.ReportMetric(float64(packetsLost)*100/float64(b.N), "%_lost")
 }

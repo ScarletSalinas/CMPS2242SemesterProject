@@ -14,7 +14,7 @@ type Server struct {
 	clientsMu 		sync.Mutex
 	listener  		net.Listener
 	running   		bool
-	BenchMarkMode  	bool
+	BenchmarkMode  	bool
 }
 
 // NewServer creates a new chat server instance
@@ -65,21 +65,17 @@ func (s *Server) handleConnection(conn net.Conn) {
 	buf := make([]byte, 1024)
 
 	 // Benchmark mode handling (simple echo)
-	 if s.BenchMarkMode {
+	 if s.BenchmarkMode {
         for {
             n, err := conn.Read(buf)
             if err != nil {
                 return
             }
-            conn.Write(buf[:n])
+            if _, err := conn.Write(buf[:n]); err != nil {
+                return
+			}
         }
     }
-
-	n, err := conn.Read(buf)
-	if err != nil {
-		return
-	}
-	conn.Write(buf[:n])
 
 	// Normal chat flow
 	if err := s.registerClient(client); err != nil {
@@ -262,14 +258,22 @@ func (s *Server) Stop() {
     s.clientsMu.Lock()
     defer s.clientsMu.Unlock()
 
+    // Optional: Notify clients (without waiting for sends to complete)
     for client := range s.clients {
-        client.SendMessage("Server shutting down...")
+        go client.SendMessage("Server shutting down...")
     }
 
-	time.Sleep(5*time.Second)
-	for client := range s.clients {
-		client.Conn.Close()
-	}
+    // Close all connections immediately
+    for client := range s.clients {
+        client.Conn.Close()  // This will interrupt any blocked operations
+    }
+    
+    // Mark server as stopped
+    s.running = false
+    
+    // Close the listener to stop accepting new connections
+    if s.listener != nil {
+        s.listener.Close()
+    }
 }
-
 
