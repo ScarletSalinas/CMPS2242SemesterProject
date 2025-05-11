@@ -1,72 +1,77 @@
 package benchmarks
 
 import (
-	"testing"
+	"context"
+	"errors"
 	"net"
+	"sync"
+	"testing"
 	"time"
 	"github.com/ScarletSalinas/SemesterProject/tcp"
 )
 
-func BenchmarkTCPServer(b *testing.B) {
-	// 1. Start the server
-	server := tcp.NewServer()
-	go server.Start(":4000")
-	defer server.Stop()
-	time.Sleep(100 * time.Millisecond) // Wait for server to start
+const (
+	testPort    = ":4000"
+	testMessage = "benchmark\n"
+)
 
+// startTestServer starts the TCP server in benchmark mode (echo only)
+func startTestServer(b *testing.B) *tcp.Server {
+	server := tcp.NewServer()
+	server.benchmarkMode = true 
+	go func() {
+		if err := server.Start(testPort); err != nil {
+			b.Fatalf("Failed to start server: %v", err)
+		}
+	}()
+
+	// Wait for server to start (max 500ms)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	for {
+		select {
+		case <-ctx.Done():
+			b.Fatal("Server did not start in time")
+		default:
+			conn, err := net.Dial("tcp", testPort)
+			if err == nil {
+				conn.Close()
+				return server
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
+// --- Benchmark Tests ---
+
+// 1. Measures average round-trip latency per message
+func BenchmarkLatency(b *testing.B) {
+	server := startTestServer(b)
+	defer server.Stop()
+
+	conn, err := net.Dial("tcp", testPort)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer conn.Close()
+
+	reader := bufio.NewReader(conn)
 	b.ResetTimer()
 
-	// 2. Test different scenarios
-	b.Run("SingleClient", func(b *testing.B) {
-		conn, err := net.Dial("tcp", ":4000")
-		if err != nil {
-			b.Fatal(err)
+	for i := 0; i < b.N; i++ {
+		start := time.Now()
+		if _, err := conn.Write([]byte(testMessage)); err != nil {
+			b.Error(err)
+			continue
 		}
-		defer conn.Close()
-
-		testMessage := []byte("benchmark\n")
-		response := make([]byte, len(testMessage))
-
-		for i := 0; i < b.N; i++ {
-			// Measure round-trip time
-			start := time.Now()
-			
-			if _, err := conn.Write(testMessage); err != nil {
-				b.Error(err)
-				continue
-			}
-			
-			if _, err := conn.Read(response); err != nil {
-				b.Error(err)
-				continue
-			}
-			
-			// Record metrics
-			b.ReportMetric(float64(time.Since(start).Nanoseconds()), "ns/op")
+		if _, err := reader.ReadString('\n'); err != nil {
+			b.Error(err)
+			continue
 		}
-	})
+		elapsed := time.Since(start)
+		b.ReportMetric(float64(elapsed.Nanoseconds()), "ns/op")
+	}
 
-	b.Run("MultipleClients", func(b *testing.B) {
-		b.RunParallel(func(pb *testing.PB) {
-			conn, err := net.Dial("tcp", ":4000")
-			if err != nil {
-				b.Fatal(err)
-			}
-			defer conn.Close()
-
-			testMessage := []byte("benchmark\n")
-			response := make([]byte, len(testMessage))
-
-			for pb.Next() {
-				if _, err := conn.Write(testMessage); err != nil {
-					b.Error(err)
-					continue
-				}
-				if _, err := conn.Read(response); err != nil {
-					b.Error(err)
-					continue
-				}
-			}
-		})
-	})
 }

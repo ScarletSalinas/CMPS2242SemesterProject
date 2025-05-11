@@ -10,11 +10,11 @@ import(
 )
 
 type Server struct {
-	clients   map[*Client]bool
-	clientsMu sync.Mutex
-	listener  net.Listener
-	running   bool
-	benchmarkMode bool
+	clients   		map[*Client]bool
+	clientsMu 		sync.Mutex
+	listener  		net.Listener
+	running   		bool
+	benchmarkMode  	bool
 }
 
 // NewServer creates a new chat server instance
