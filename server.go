@@ -129,7 +129,6 @@ func (s *Server) handleMessage(client *Client, msg string) {
 	switch {
 	case msg == "/quit":
 		s.broadcastSystemMessage(fmt.Sprintf("\033[1;31m%s has left the chat\033[0m", client.Username))
-		s.cleanupClient(client)
 		return  // Exit the handler after quitting
 
 	case msg == "/help":
@@ -160,8 +159,13 @@ func (s *Server) listUsers(client *Client) {
 
 	var users []string
 	for c := range s.clients {
-		users = append(users, c.Username)
-	}
+		c.mu.Lock()
+        if !c.closed {
+            users = append(users, c.Username)
+        }
+        c.mu.Unlock()
+    }
+    
 	client.sendMessage(fmt.Sprintf("\033[1;35mOnline users: \033[1;33m%s\033[0m", strings.Join(users, ", ")))
 }
 
@@ -188,23 +192,28 @@ func (s *Server) broadcastSystemMessage(msg string) {
 
 // cleanupClient removes a disconnected client
 func (s *Server) cleanupClient(client *Client) {
-	s.clientsMu.Lock()
-	defer s.clientsMu.Unlock()
+	// Broadcast while client is still in map
+    s.clientsMu.Lock()
+	defer s.clientsMu.Unlock()    
 
 	if _, exists := s.clients[client]; exists {
-        delete(s.clients, client)
-		client.Conn.Close() // Immediate close
-        s.broadcastSystemMessage(fmt.Sprintf("\033[1;31m%s has left the chat\033[0m", client.Username))
-        log.Printf("[%s] %s@%s disconnected (%d active connections)", time.Now().Format("2006-01-02 15:04:05"),client.Username, client.Conn.RemoteAddr().String(), len(s.clients))
-    }
+        leaveMsg := fmt.Sprintf("\033[1;31m%s has left the chat\033[0m", client.Username)
+        for remainingClient := range s.clients {
+            if remainingClient != client {
+                remainingClient.sendMessage(leaveMsg)
+            }
+        }
 
-	// Broadcast leave message to ALL remaining clients
-	msg := fmt.Sprintf("\033[1;31m%s has left the chat\033[0m", client.Username)
-	for remainingClient := range s.clients {
-		if err := remainingClient.sendMessage(msg); err != nil {
-			log.Printf("Failed to notify %s: %v", remainingClient.Username, err)
-		}
+		 // Cleanup
+		 delete(s.clients, client)
+		 client.Close()
+		 log.Printf("[%s] %s@%s disconnected (%d active connections)", 
+			 time.Now().Format("2006-01-02 15:04:05"),
+			 client.Username, 
+			 client.Conn.RemoteAddr().String(), 
+			 len(s.clients))
 	}
+    
 }
 
 // Graceful shutdown

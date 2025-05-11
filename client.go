@@ -16,6 +16,8 @@ type Client struct {
 	Username string
 	writer   *syncWriter // private thread-safe writer
 	LastMessage time.Time
+	mu sync.Mutex
+	closed bool
 }
 
 // syncWriter provides thread-safe writing with line clearing
@@ -29,7 +31,16 @@ func newSyncWriter(conn net.Conn) *syncWriter {
 	return &syncWriter{conn: conn}
 }
 
-// Method for prompts-no newline
+func (c *Client) Close() {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    if !c.closed {
+        c.Conn.Close()
+        c.closed = true
+    }
+}
+
+// Prompts-no newline
 func (w *syncWriter) write(text string) error {
 	w.Lock()
 	defer w.Unlock()
