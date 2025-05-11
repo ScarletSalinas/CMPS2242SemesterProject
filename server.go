@@ -23,14 +23,14 @@ func NewServer() *Server {
 }
 
 // Start begins listening for connections
-func (s *Server) Start(port string) error {
-	listener, err := net.Listen("tcp", port)
+func (s *Server) Start(address string) error {
+	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		return err
 	}
 	defer listener.Close()
 
-	log.Printf("Chat server running on %s", port)
+	log.Printf("Chat server running on %s", listener.Addr())
 
 	for {
 		conn, err := listener.Accept()

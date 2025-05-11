@@ -4,6 +4,7 @@ import (
 	"flag"
 	"log"
 	"strconv"
+	"strings"
 )
 
 func main() {
@@ -11,16 +12,16 @@ func main() {
 	port := flag.String("port", "4000", "TCP port to listen on")
 	flag.Parse()
 
-	// Convert and validate port
-	p, err := strconv.Atoi(*port)
-	if err != nil || p < 1 || p > 1024 {
-		log.Fatal("Port must be a number between 1 and 1024")
+	// Clean and validate the port
+	portStr := strings.TrimSpace(*port)
+	if _, err := strconv.Atoi(portStr); err != nil {
+		log.Fatalf("Invalid port number: %v", err)
 	}
+	address := ":" + portStr
 
 	// Start server
 	server := NewServer()
-
-	if err := server.Start(": + port"); err != nil {
+	if err := server.Start(address); err != nil {
 		log.Fatal(err)
 	}
 }
