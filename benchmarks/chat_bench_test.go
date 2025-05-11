@@ -1,71 +1,72 @@
 package benchmarks
 
 import (
-	"net"
 	"testing"
+	"net"
 	"time"
 	"github.com/ScarletSalinas/SemesterProject/tcp"
 )
 
-func BenchmarkServerPerformance(b *testing.B) {
-	// Create server instance
+func BenchmarkTCPServer(b *testing.B) {
+	// 1. Start the server
 	server := tcp.NewServer()
-	
-	// Start server in goroutine
-	go func() {
-		if err := server.Start(":4000"); err != nil {
-			b.Errorf("Server failed: %v", err)
-		}
-	}()
+	go server.Start(":4000")
 	defer server.Stop()
-	
-	time.Sleep(100 * time.Millisecond) // Wait for server start
+	time.Sleep(100 * time.Millisecond) // Wait for server to start
 
 	b.ResetTimer()
-	
-	// Metrics collectors
-	var (
-		totalLatency time.Duration
-		successCount int
-		messageSize  = 128 // bytes
-	)
 
-	for i := 0; i < b.N; i++ {
-		start := time.Now()
-		
+	// 2. Test different scenarios
+	b.Run("SingleClient", func(b *testing.B) {
 		conn, err := net.Dial("tcp", ":4000")
 		if err != nil {
-			b.Logf("Connection failed: %v", err)
-			continue
+			b.Fatal(err)
 		}
+		defer conn.Close()
 
-		// Test message
-		msg := make([]byte, messageSize)
-		_, err = conn.Write(msg)
-		if err != nil {
-			b.Logf("Write failed: %v", err)
-			conn.Close()
-			continue
+		testMessage := []byte("benchmark\n")
+		response := make([]byte, len(testMessage))
+
+		for i := 0; i < b.N; i++ {
+			// Measure round-trip time
+			start := time.Now()
+			
+			if _, err := conn.Write(testMessage); err != nil {
+				b.Error(err)
+				continue
+			}
+			
+			if _, err := conn.Read(response); err != nil {
+				b.Error(err)
+				continue
+			}
+			
+			// Record metrics
+			b.ReportMetric(float64(time.Since(start).Nanoseconds()), "ns/op")
 		}
+	})
 
-		// Read response
-		buf := make([]byte, messageSize)
-		_, err = conn.Read(buf)
-		latency := time.Since(start)
-		conn.Close()
+	b.Run("MultipleClients", func(b *testing.B) {
+		b.RunParallel(func(pb *testing.PB) {
+			conn, err := net.Dial("tcp", ":4000")
+			if err != nil {
+				b.Fatal(err)
+			}
+			defer conn.Close()
 
-		if err == nil {
-			successCount++
-			totalLatency += latency
-		}
-	}
+			testMessage := []byte("benchmark\n")
+			response := make([]byte, len(testMessage))
 
-	// Calculate metrics
-	throughput := float64(successCount*messageSize) / 1e6 // MB/s
-	avgLatency := totalLatency / time.Duration(successCount)
-	packetLoss := 1 - float64(successCount)/float64(b.N)
-
-	b.ReportMetric(avgLatency.Seconds()*1000, "avg_latency_ms")
-	b.ReportMetric(throughput, "throughput_mb_s")
-	b.ReportMetric(packetLoss*100, "packet_loss_%")
+			for pb.Next() {
+				if _, err := conn.Write(testMessage); err != nil {
+					b.Error(err)
+					continue
+				}
+				if _, err := conn.Read(response); err != nil {
+					b.Error(err)
+					continue
+				}
+			}
+		})
+	})
 }
