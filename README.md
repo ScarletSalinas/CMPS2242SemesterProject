@@ -77,7 +77,7 @@ Throughput: 39,229 msg/s
 - [W3Schools](https://www.w3schools.com/go/go_switch.php)
 
 # Link to video and presentation
-[Watch demo here]() 
+[Watch demo here](https://www.youtube.com/watch?v=wSEWHL-QNBE) 
 [View Slides here](https://docs.google.com/presentation/d/1Z5EwuB8ZRvuQEp95mF7FgSsF6ac3ZR0v/edit#slide=id.p1) 
 
 
