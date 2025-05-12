@@ -77,6 +77,6 @@ Throughput: 39,229 msg/s
 
 # Link to video and presentation
 [Watch demo here]() 
-[View Slides here]([(https://docs.google.com/presentation/d/1Z5EwuB8ZRvuQEp95mF7FgSsF6ac3ZR0v/edit#slide=id.p1]) 
+[View Slides here](https://docs.google.com/presentation/d/1Z5EwuB8ZRvuQEp95mF7FgSsF6ac3ZR0v/edit#slide=id.p1) 
 
 
